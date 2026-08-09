@@ -44,6 +44,7 @@ import { useGraphTabsStore, type EditorSnapshot } from '../features/graph-tabs/s
 import { useEditorStore } from '../features/graph-editor/store/editorStore';
 import { getVirtualRoutingBlockDetails } from '../features/graph-editor/model/virtual-routing';
 import { InspectorPanel } from '../features/inspector/inspector-panel';
+import { useOnboardingTour } from '../features/onboarding/use-onboarding-tour';
 import { GlobalSessionsDrawer } from '../features/runtime-session/components/global-sessions-drawer';
 import { resolveCurrentSessionStudioBindingView } from '../features/runtime-session/model/runtime-binding-resolution';
 import { useRuntimeSessionStore } from '../features/runtime-session/store/runtimeSessionStore';
@@ -191,6 +192,7 @@ export function StudioPage() {
   const persistenceService = useMemo(() => createDocumentPersistenceService(), []);
   const blockCatalogQuery = useBlockCatalogQuery();
   const connectionStatus = getConnectionStatus(blockCatalogQuery);
+  const { startTour } = useOnboardingTour();
 
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [centerViewByTabId, setCenterViewByTabId] = useState<Record<string, CenterViewMode>>({});
@@ -1413,7 +1415,7 @@ export function StudioPage() {
             <h1 className="text-lg font-semibold tracking-[0.22em] uppercase text-slate-100">gr4-studio</h1>
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0" data-tour="document-actions">
           <details className="relative">
             <summary className="cursor-pointer list-none rounded border border-slate-600 bg-slate-800 px-2 py-1 text-xs text-slate-200 hover:bg-slate-700">
               File
@@ -1502,6 +1504,14 @@ export function StudioPage() {
             {backendEndpointLabel}
           </span>
           <StatusBadge status={connectionStatus} />
+          <button
+            type="button"
+            onClick={startTour}
+            title="Replay the gr4-studio onboarding tour"
+            className="rounded border border-cyan-800/70 bg-cyan-950/40 px-2 py-1 text-xs text-cyan-200 hover:bg-cyan-900/50"
+          >
+            Tour
+          </button>
         </div>
       </header>
 
@@ -1546,12 +1556,12 @@ export function StudioPage() {
       )}
 
       <main className="min-h-0 flex-1 overflow-hidden grid grid-cols-[18rem_1fr_20rem]">
-        <aside className="min-h-0 overflow-hidden border-r border-border bg-panel">
+        <aside className="min-h-0 overflow-hidden border-r border-border bg-panel" data-tour="block-catalog">
           <BlockCatalogPanel />
         </aside>
 
         <section className="relative min-h-0 overflow-hidden bg-slate-950 flex flex-col">
-          <div className="h-10 shrink-0 border-b border-border bg-slate-950/80 px-3 flex items-center gap-2">
+          <div className="h-10 shrink-0 border-b border-border bg-slate-950/80 px-3 flex items-center gap-2" data-tour="view-switcher">
             <button
               type="button"
               onClick={() => setActiveCenterView('graph')}
@@ -1600,7 +1610,7 @@ export function StudioPage() {
             ) : null}
             <div className="ml-auto flex items-center gap-2">
               {runtimeView && activeTabId && (
-                <div className="flex items-center gap-1.5 rounded border border-slate-700 bg-slate-900/70 px-2 py-1">
+                <div className="flex items-center gap-1.5 rounded border border-slate-700 bg-slate-900/70 px-2 py-1" data-tour="run-controls">
                   <StatusPill status={runtimeView.executionState} />
                   <button
                     type="button"
@@ -1657,7 +1667,7 @@ export function StudioPage() {
             </div>
           </div>
 
-          <div className="relative min-h-0 flex-1 overflow-hidden">
+          <div className="relative min-h-0 flex-1 overflow-hidden" data-tour="graph-canvas">
             {activeCenterView === 'graph' ? (
               <GraphEditorPanel
                 key={`${activeTabId ?? 'no-active-tab'}:${activeTab?.document.internalDocumentId ?? 'no-document'}`}
@@ -1713,7 +1723,7 @@ export function StudioPage() {
           </div>
         </section>
 
-        <aside className="min-h-0 overflow-hidden border-l border-border bg-panel">
+        <aside className="min-h-0 overflow-hidden border-l border-border bg-panel" data-tour="inspector">
           <InspectorPanel />
         </aside>
       </main>
