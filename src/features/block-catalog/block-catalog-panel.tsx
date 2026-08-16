@@ -8,6 +8,7 @@ import { getVirtualRoutingCatalogBlocks } from '../graph-editor/model/virtual-ro
 import { useEditorStore } from '../graph-editor/store/editorStore';
 import {
   buildCategoryTree,
+  buildVariantEntries,
   collectCategoryPaths,
   countCategoryNode,
   normalizeCategoryPath,
@@ -18,26 +19,76 @@ import {
 import { useBlockCatalogQuery } from './hooks/use-block-catalog-query';
 import { config } from '../../lib/config';
 
-function BlockVariantButton({ block }: { block: BlockCatalogItem }) {
+/** Families with more instantiations than this keep their type list collapsed. */
+const VARIANT_LABEL_COLLAPSE_THRESHOLD = 12;
+
+function BlockFamilyEntry({
+  typeName,
+  variants,
+}: {
+  typeName: string;
+  variants: BlockCatalogItem[];
+}) {
   const addNodeFromCatalogItem = useEditorStore((state) => state.addNodeFromCatalogItem);
-  const parsed = parseTypeId(block.blockTypeId);
+  const [variantsExpanded, setVariantsExpanded] = useState(false);
+  const entries = buildVariantEntries(variants);
+  const defaultEntry = entries[0];
+  const brief = variants
+    .map((block) =>
+      block.description ? (extractDoxygenBrief(block.description) ?? block.description) : '',
+    )
+    .find((text) => text.length > 0);
+  const showVariantLabels = entries.length > 1 || defaultEntry?.label !== '(default)';
+  const collapsible = entries.length > VARIANT_LABEL_COLLAPSE_THRESHOLD;
+  const collapsed = collapsible && !variantsExpanded;
+
+  if (!defaultEntry) {
+    return null;
+  }
 
   return (
-    <button
-      className="w-full text-left rounded-md border border-slate-700 bg-slate-800/70 px-3 py-2 hover:border-accent hover:bg-slate-800 transition"
-      onClick={() => addNodeFromCatalogItem(toEditorCatalogBlock(block))}
-      title={block.blockTypeId}
-      type="button"
-    >
-      <div className="text-sm font-medium text-slate-100">
-        {parsed.familyName} {parsed.variantLabel}
-      </div>
-      {block.description && (
-        <div className="mt-1 text-xs text-slate-400 line-clamp-2">
-          {extractDoxygenBrief(block.description) ?? block.description}
+    <div className="rounded-md border border-slate-700 bg-slate-800/70 px-3 py-2 hover:border-accent hover:bg-slate-800 transition">
+      <button
+        className="w-full text-left text-sm font-medium text-slate-100"
+        onClick={() => addNodeFromCatalogItem(toEditorCatalogBlock(defaultEntry.block))}
+        title={brief ? `${defaultEntry.block.blockTypeId}\n\n${brief}` : defaultEntry.block.blockTypeId}
+        type="button"
+      >
+        {typeName}
+      </button>
+
+      {showVariantLabels && (
+        <div className="mt-1 flex flex-wrap gap-1">
+          {!collapsed &&
+            entries.map((entry) => (
+              <button
+                key={entry.block.blockTypeId}
+                className="rounded border border-slate-700 bg-slate-950/60 px-1.5 py-0.5 font-mono text-[11px] leading-tight text-slate-400 hover:border-accent hover:text-slate-100 transition"
+                onClick={() => {
+                  addNodeFromCatalogItem(toEditorCatalogBlock(entry.block));
+                  // Long type lists fold back up once a type has been picked.
+                  setVariantsExpanded(false);
+                }}
+                title={entry.block.blockTypeId}
+                type="button"
+              >
+                {entry.label}
+              </button>
+            ))}
+
+          {collapsible && (
+            <button
+              className="rounded border border-slate-700 bg-slate-950/60 px-1.5 py-0.5 text-[11px] leading-tight text-slate-400 hover:border-accent hover:text-slate-100 transition"
+              onClick={() => setVariantsExpanded((expanded) => !expanded)}
+              aria-expanded={variantsExpanded}
+              type="button"
+            >
+              {collapsed ? `Show ${entries.length} types...` : 'Hide types'}
+            </button>
+          )}
         </div>
       )}
-    </button>
+    </div>
   );
 }
 
@@ -46,28 +97,13 @@ function TypeGroupList({ types, pathKey }: { types: CatalogTypeGroup; pathKey: s
 
   return (
     <div className="space-y-2 pb-1">
-      {typeNames.map((typeName) => {
-        const variants = (types.get(typeName) ?? [])
-          .slice()
-          .sort((a, b) => a.blockTypeId.localeCompare(b.blockTypeId));
-
-        return (
-          <details
-            key={`${pathKey}:${typeName}`}
-            className="rounded border border-slate-700 bg-slate-950/60 px-2 py-1"
-          >
-            <summary className="cursor-pointer text-xs font-medium text-slate-300 py-1">
-              {typeName} ({variants.length})
-            </summary>
-
-            <div className="space-y-2 pb-1">
-              {variants.map((block) => (
-                <BlockVariantButton key={block.blockTypeId} block={block} />
-              ))}
-            </div>
-          </details>
-        );
-      })}
+      {typeNames.map((typeName) => (
+        <BlockFamilyEntry
+          key={`${pathKey}:${typeName}`}
+          typeName={typeName}
+          variants={types.get(typeName) ?? []}
+        />
+      ))}
     </div>
   );
 }

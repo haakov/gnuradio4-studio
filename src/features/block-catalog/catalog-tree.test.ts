@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { BlockCatalogItem } from '../../lib/api/blocks';
 import {
   buildCategoryTree,
+  buildVariantEntries,
   collectCategoryPaths,
+  countCategoryNode,
   deriveNamespaceCategoryPath,
   normalizeCategoryPath,
   parseTypeId,
@@ -63,7 +65,62 @@ describe('catalog tree helpers', () => {
     );
 
     expect(parsed.familyName).toBe('StreamFilterImpl');
-    expect(parsed.variantLabel).toBe('<pmtcomplex<float32>>');
+    expect(parsed.variantLabel).toBe('c<f32>');
+    expect(parsed.templateArgs).toEqual(['c<f32>', 'true', 'BasicTriggerNameCtxMatcher']);
+    expect(parsed.verboseTemplateArgs).toEqual([
+      'pmtcomplex<float32>',
+      'true',
+      'BasicTriggerNameCtxMatcher',
+    ]);
+  });
+
+  it('labels the instantiations of a block family by abbreviated primary template argument', () => {
+    const entries = buildVariantEntries([
+      makeBlock({ blockTypeId: 'gr::basic::SignalGenerator<float64>' }),
+      makeBlock({ blockTypeId: 'gr::basic::SignalGenerator<float32>' }),
+      makeBlock({ blockTypeId: 'gr::basic::SignalGenerator<std::complex<float32>>' }),
+    ]);
+
+    expect(entries.map((entry) => entry.label)).toEqual(['c<f32>', 'f32', 'f64']);
+    expect(entries[1]?.block.blockTypeId).toBe('gr::basic::SignalGenerator<float32>');
+  });
+
+  it('falls back to the full template argument list when primary arguments collide', () => {
+    const entries = buildVariantEntries([
+      makeBlock({ blockTypeId: 'gr::basic::ClockSource<uint8, std::chrono::nanoseconds>' }),
+      makeBlock({ blockTypeId: 'gr::basic::ClockSource<uint8, std::chrono::microseconds>' }),
+      makeBlock({ blockTypeId: 'gr::basic::ClockSource<float32>' }),
+    ]);
+
+    expect(entries.map((entry) => entry.label)).toEqual(['f32', 'ui8, ns', 'ui8, us']);
+  });
+
+  it('falls back to unabbreviated arguments when abbreviations collide', () => {
+    const entries = buildVariantEntries([
+      makeBlock({ blockTypeId: 'gr::blocks::NullSink<float>' }),
+      makeBlock({ blockTypeId: 'gr::blocks::NullSink<float32>' }),
+    ]);
+
+    expect(entries.map((entry) => entry.label)).toEqual(['float', 'float32']);
+  });
+
+  it('labels a non-templated block as the default instantiation', () => {
+    const entries = buildVariantEntries([makeBlock({ blockTypeId: 'gr::basic::ClockSource' })]);
+
+    expect(entries.map((entry) => entry.label)).toEqual(['(default)']);
+  });
+
+  it('counts one catalog entry per block family, not per instantiation', () => {
+    const tree = buildCategoryTree([
+      makeBlock({ blockTypeId: 'gr::basic::SignalGenerator<float32>' }),
+      makeBlock({ blockTypeId: 'gr::basic::SignalGenerator<float64>' }),
+      makeBlock({ blockTypeId: 'gr::basic::ClockSource<float32>' }),
+      makeBlock({ blockTypeId: 'gr::incubator::analog::QuadratureDemod<float32>' }),
+    ]);
+
+    const basic = tree.children.get('basic');
+    expect(countCategoryNode(tree)).toBe(3);
+    expect(basic && countCategoryNode(basic)).toBe(2);
   });
 
   it('builds nested category tree nodes from slash-delimited categories', () => {

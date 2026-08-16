@@ -1,9 +1,23 @@
 import type { BlockCatalogItem } from '../../lib/api/blocks';
+import {
+  abbreviateTypeExpr,
+  splitTopLevelTemplateArgs,
+  stripScopedTypeNames,
+} from './type-names';
 
 export type ParsedTypeId = {
   moduleName: string;
   familyName: string;
   variantLabel: string;
+  /** Template arguments in their abbreviated catalog spelling, e.g. `['ui8', 'ns']`. */
+  templateArgs: string[];
+  /** Template arguments with namespaces stripped but no abbreviation applied. */
+  verboseTemplateArgs: string[];
+};
+
+export type CatalogVariantEntry = {
+  block: BlockCatalogItem;
+  label: string;
 };
 
 export type CatalogTypeGroup = Map<string, BlockCatalogItem[]>;
@@ -17,45 +31,6 @@ export function createCategoryTreeNode(): CategoryTreeNode {
     children: new Map(),
     types: new Map(),
   };
-}
-
-function splitTopLevelTemplateArgs(templateArgs: string): string[] {
-  const args: string[] = [];
-  let depth = 0;
-  let start = 0;
-
-  for (let index = 0; index < templateArgs.length; index += 1) {
-    const char = templateArgs[index];
-    if (char === '<') {
-      depth += 1;
-      continue;
-    }
-    if (char === '>') {
-      depth = Math.max(0, depth - 1);
-      continue;
-    }
-    if (char === ',' && depth === 0) {
-      args.push(templateArgs.slice(start, index).trim());
-      start = index + 1;
-    }
-  }
-
-  const tail = templateArgs.slice(start).trim();
-  if (tail) {
-    args.push(tail);
-  }
-
-  return args.filter((arg) => arg.length > 0);
-}
-
-function stripScopedTypeNames(typeExpr: string): string {
-  return typeExpr.replace(
-    /\b[A-Za-z_]\w*(?:::[A-Za-z_]\w*)+\b/g,
-    (match) => {
-      const segments = match.split('::');
-      return segments[segments.length - 1] ?? match;
-    },
-  );
 }
 
 export function parseTypeId(blockTypeId: string): ParsedTypeId {
@@ -80,14 +55,56 @@ export function parseTypeId(blockTypeId: string): ParsedTypeId {
         : core;
 
   const topLevelArgs = templateArgs ? splitTopLevelTemplateArgs(templateArgs) : [];
-  const primaryArg = topLevelArgs[0] ?? '';
-  const compactPrimaryArg = primaryArg ? stripScopedTypeNames(primaryArg) : '';
+  const verboseArgs = topLevelArgs.map((arg) => stripScopedTypeNames(arg));
+  const compactArgs = topLevelArgs.map((arg) => abbreviateTypeExpr(arg));
 
   return {
     moduleName,
     familyName: familyName || blockTypeId,
-    variantLabel: compactPrimaryArg ? `<${compactPrimaryArg}>` : '(default)',
+    variantLabel: formatVariantLabel(compactArgs.slice(0, 1)),
+    templateArgs: compactArgs,
+    verboseTemplateArgs: verboseArgs,
   };
+}
+
+export function formatVariantLabel(templateArgs: string[]): string {
+  return templateArgs.length > 0 ? templateArgs.join(', ') : '(default)';
+}
+
+/**
+ * Naming schemes for the instantiations of one block family, from shortest to
+ * most explicit. The whole family shares whichever scheme first tells all of its
+ * instantiations apart, so labels within a family stay comparable.
+ */
+const verboseVariantLabelScheme = (parsed: ParsedTypeId) =>
+  formatVariantLabel(parsed.verboseTemplateArgs);
+
+const VARIANT_LABEL_SCHEMES: ((parsed: ParsedTypeId) => string)[] = [
+  (parsed) => formatVariantLabel(parsed.templateArgs.slice(0, 1)),
+  (parsed) => formatVariantLabel(parsed.templateArgs),
+  verboseVariantLabelScheme,
+];
+
+export function buildVariantEntries(variants: BlockCatalogItem[]): CatalogVariantEntry[] {
+  const parsedVariants = variants.map((block) => ({
+    block,
+    parsed: parseTypeId(block.blockTypeId),
+  }));
+
+  const scheme =
+    VARIANT_LABEL_SCHEMES.find((candidate) => {
+      const labels = new Set(parsedVariants.map(({ parsed }) => candidate(parsed)));
+      return labels.size === parsedVariants.length;
+    }) ?? verboseVariantLabelScheme;
+
+  return parsedVariants
+    .map(({ block, parsed }) => ({ block, label: scheme(parsed) }))
+    .sort(
+      (a, b) =>
+        // Numeric collation keeps width-suffixed labels in width order: i8, i16, i32.
+        a.label.localeCompare(b.label, undefined, { numeric: true }) ||
+        a.block.blockTypeId.localeCompare(b.block.blockTypeId),
+    );
 }
 
 export function deriveNamespaceCategoryPath(blockTypeId: string): string {
@@ -108,10 +125,7 @@ export function normalizeCategoryPath(block: BlockCatalogItem): string {
 }
 
 export function countCategoryNode(node: CategoryTreeNode): number {
-  let total = 0;
-  for (const variants of node.types.values()) {
-    total += variants.length;
-  }
+  let total = node.types.size;
   for (const child of node.children.values()) {
     total += countCategoryNode(child);
   }
